@@ -1,1 +1,13 @@
-a<- c(1,2,2,2,2,2,2,2)
+plot(cars)
+
+
+ninini
+
+
+
+
+dedrrfrf
+
+
+ddedede
+jiini
