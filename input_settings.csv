@@ -1,0 +1,16 @@
+Parameter, Value
+MinDateFit,2011-07-04
+MaxDateFit,2019-05-05
+MinDateForecast,2019-05-06
+MaxDateForecast,2019-05-12
+OutlierFactor,1.96
+FileInputTable,/var/www/html/tools/cc-forecast-2nd-generation/engines/forecast_algorithm/input_table.csv
+FileInputSettings,/var/www/html/tools/cc-forecast-2nd-generation/engines/forecast_algorithm/input_settings.csv
+FileOutputTable,/var/www/html/tools/cc-forecast-2nd-generation/engines/forecast_algorithm/output_table.csv
+FileOutputSettings,/var/www/html/tools/cc-forecast-2nd-generation/engines/forecast_algorithm/output_settings.csv
+LogActuals,1
+IncrementCoefficient,1
+SeasonSmoothness,0
+TrendDamping,1
+IncludePredictiveEvents,1
+ForceNonnegativeForecast,1
