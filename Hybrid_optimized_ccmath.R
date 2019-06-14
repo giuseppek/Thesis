@@ -1,11 +1,6 @@
-#install.packages("L1pack", lib= "/home/giuseppe/anaconda3/envs/rstudio/lib/R/library",  repos="http://cran.cnr.berkeley.edu" )
-#library( "L1pack")
 library(MASS)
-# check best phase to remove outliers
-# remove linear trend before taking the log
-#trend_coefficient= lad( fitData_no_closed_days$Actual ~ time_index )$coefficients[2] # to be used in the forecast 
 
-#remove  seasonalities
+
 
 ts.plot(fitData_no_closed_days$Actual[1:30]  )
 y= log( fitData_no_closed_days$Actual+1 )
