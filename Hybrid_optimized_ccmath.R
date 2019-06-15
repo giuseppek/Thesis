@@ -1,10 +1,163 @@
 library(MASS)
+library(magrittr)
+
+##### fuunction for selecting data between two specific dates
+DataInPeriod <- function(x, startDate, endDate) {
+  startIndex = which(x[, 1] == startDate)[1]
+  endIndex = which(x[, 1] == endDate)[1]
+  result <- x[startIndex:endIndex, ]
+}
+
+#### function for computing the WAPE
+WAPE <- function(x, y) {
+  # Computes the Weighted Absolute Percentage Error (WAPE) between two vectors.
+  sum(abs(x - y)) / sum(x)
+}
+
+#######function for removing missing levels in test data sets for lm models # https://stackoverflow.com/a/39495480/4185785
+remove_missing_levels <- function(fit, test_data) {
+# drop empty factor levels in test data
+  test_data %>%
+    droplevels() %>%
+    as.data.frame() -> test_data
+  
+  # 'fit' object structure of 'lm' and 'glmmPQL' is different so we need to
+  # account for it
+  if (any(class(fit) == "glmmPQL")) {
+    # Obtain factor predictors in the model and their levels
+    factors <- (gsub("[-^0-9]|as.factor|\\(|\\)", "",
+                     names(unlist(fit$contrasts))))
+    # do nothing if no factors are present
+    if (length(factors) == 0) {
+      return(test_data)
+    }
+    
+    map(fit$contrasts, function(x) names(unmatrix(x))) %>%
+      unlist() -> factor_levels
+    factor_levels %>% str_split(":", simplify = TRUE) %>%
+      extract(, 1) -> factor_levels
+    
+    model_factors <- as.data.frame(cbind(factors, factor_levels))
+  } else {
+    # Obtain factor predictors in the model and their levels
+    factors <- (gsub("[-^0-9]|as.factor|\\(|\\)", "",
+                     names(unlist(fit$xlevels))))
+    # do nothing if no factors are present
+    if (length(factors) == 0) {
+      return(test_data)
+    }
+    
+    factor_levels <- unname(unlist(fit$xlevels))
+    model_factors <- as.data.frame(cbind(factors, factor_levels))
+  }
+  
+  # Select column names in test data that are factor predictors in
+  # trained model
+  
+  predictors <- names(test_data[names(test_data) %in% factors])
+  
+  # For each factor predictor in your data, if the level is not in the model,
+  # set the value to NA
+  
+  for (i in 1:length(predictors)) {
+    found <- test_data[, predictors[i]] %in% model_factors[
+      model_factors$factors == predictors[i], ]$factor_levels
+    if (any(!found)) {
+      # track which variable
+      var <- predictors[i]
+      # set to NA
+      test_data[!found, predictors[i]] <- NA
+      # drop empty factor levels in test data
+      test_data %>%
+        droplevels() -> test_data
+      # issue warning to console
+      message(sprintf(paste0("Setting missing levels in '%s', only present",
+                             " in test data but missing in train data,",
+                             " to 'NA'."),
+                      var))
+    }
+  }
+  return(test_data)
+}
 
 
 
-ts.plot(fitData_no_closed_days$Actual[1:30]  )
+
+
+########## Pre-process data ###########################
+# Set input parameters
+paramTable <- as.matrix(read.table("input_settings.csv", sep=",", header=TRUE))
+params <- as.list(paramTable[, "Value"])
+names(params) <- paramTable[, "Parameter"]
+
+
+##### pre-process input data
+
+# Import data
+data <- read.table("input_table.csv", header=TRUE, sep=",", quote="")
+colnames(data)[colnames(data)=="Volume"] = "Actual" 
+
+# Update date parameters if needed
+#data = data[as.numeric(as.Date(data$Date))> as.numeric(as.Date(params$MinDateFit)),] 
+firstObservedDate <- data$Date[1]
+if (as.Date(firstObservedDate) > as.Date(params$MinDateFit)) {
+  params$MinDateFit <- firstObservedDate
+}
+lastObservedDate <- data$Date[length(data$Date)]
+if (as.Date(params$MaxDateFit) > as.Date(lastObservedDate)) {
+  params$MaxDateFit <- lastObservedDate
+}
+if (as.Date(params$MinDateFit) > as.Date(params$MaxDateFit)) {
+  params$MaxDateFit <- params$MinDateFit
+}
+# Process imported data
+data = data[as.numeric(as.Date(data$Date))>= as.numeric(as.Date(params$MinDateFit)),] ## discard data not used for fit
+data = data[as.numeric(as.Date(data$Date))<= as.numeric(as.Date(params$MaxDateForecast)),] ## discard data for which we do not forecast
+data$Date <- as.Date(data$Date)
+data$Year <- as.numeric(format(data$Date, "%G")) # Year of date: %Y
+data$Month <- as.numeric(format(data$Date, "%m"))
+data$Week <- as.numeric(format(data$Date, "%V"))
+data$Yearweek <- as.numeric(format(data$Date, "%G%V"))
+data$Weeknumber <- as.numeric(factor(data$Yearweek))
+data$Weekday <- as.numeric(format(data$Date, "%u"))
+data$IsHoliday <- 0        
+data$IsHoliday[data$Holiday!=""] <- 1
+data$Actual[which(data$Actual< 0)] = NA
+
+# Create fit data set 
+fitData <- DataInPeriod(data, as.Date(params$MinDateFit), as.Date(params$MaxDateFit)) # the index cleanes if code is runned multiple time
+# Include outlier column
+
+# detect closed days in last month of data
+
+if(length(fitData$Date)>30){
+  recent<- 30
+}else{
+  recent<- length(fitData$Date)+1
+}
+
+most_recent_data<- fitData[(as.integer(length(fitData$Date)-recent)):(length(fitData$Date)),]
+most_recent_data[is.na(most_recent_data)] = 0  
+closed_days_binary <- rep(0,7)
+for(i in 1:7){
+  
+  if (sum(most_recent_data$Actual[most_recent_data$Weekday == i]) == 0){
+    closed_days_binary[i]<- 1
+  }
+}
+
+closed_days <-which(closed_days_binary==1)
+
+# create data_set excluding closed days
+data_no_closed_days<- data[!data$Weekday %in% closed_days,]
+# fitData_set excluding closed days
+fitData_no_closed_days<- fitData[!fitData$Weekday %in% closed_days,]
+#--------------------------------------------------------
+forecastData_no_closed_days <- data_no_closed_days[data_no_closed_days$Date > as.Date(params$MinDateForecast),]
+
+#ts.plot(fitData_no_closed_days$Actual[1:30]  )
 y= log( fitData_no_closed_days$Actual+1 )
-plot(y)
+#plot(y)
 weekday= factor(fitData_no_closed_days$Weekday)
 week=  factor(fitData_no_closed_days$Week)
 month= factor(fitData_no_closed_days$Month)
@@ -13,64 +166,96 @@ time_index_2= time_index^2
 time_index_3= time_index^3
 time_index_4= time_index^4
 
-
 ## fitting and outlier detection 
-for(i in 1:10){
-model_1 <- lm(y ~ weekday + month + time_index + time_index_2+ time_index_3+ time_index_4)
-fitted <- predict( model_1, data.frame( weekday,month, time_index,time_index_2,time_index_3,time_index_4) )
-distances<- abs( exp(fitted) -  (fitData_no_closed_days$Actual+1) )
-outliers<- distances/(exp(fitted)) > 0.7 & distances> 3*sqrt(pmax(0,(exp(fitted)-1)))
-y=  log( fitData_no_closed_days$Actual+1 )
-y[outliers]= NA 
+################################# less than one year data ###################################
+if( length(y)< 365){
+  
+  for(i in 1:10){
+  model_1 <- lm(y ~ weekday + time_index + time_index_2+ time_index_3+ time_index_4)
+  fitted <- predict( model_1, data.frame( weekday,time_index,time_index_2,time_index_3,time_index_4) )
+  distances<- abs( exp(fitted) -  (fitData_no_closed_days$Actual+1) )
+  outliers<- distances/(exp(fitted)) > 0.7  & distances> 3*sqrt(pmax(0,(exp(fitted)-1)))
+  y=  log( fitData_no_closed_days$Actual+1 )
+  y[outliers]= NA 
 }
 y=  log( fitData_no_closed_days$Actual+1 )
-sum(outliers)
-summary(model_1)
-
-
-plot( model_1$residuals)
-
-
+outliers[is.na(outliers)]= FALSE
 residuals =  y- fitted   # so to mantain the order
 residuals[outliers]= 0  # substitute outliers with zero
-
-#########################For Graphs #########################################################################
-#fitted= predict( model_1, data.frame( weekday,week, time_index,time_index_2,time_index_3,time_index_4) )  # for data bigger than 3 years
 fitted= predict( model_1, data.frame( weekday,month, time_index,time_index_2,time_index_3,time_index_4) ) # for data smaller than 3 years
-#prova= predict( model_1, data.frame(weekday= factor(1), week=factor(1), time_index,time_index_2,time_index_3,time_index_4))  for data longer than 3 years
-level= predict( model_1, data.frame(weekday= factor(1), month =factor(1), time_index,time_index_2,time_index_3,time_index_4)) # for data smaller 
-
-season_week =  predict( model_1, data.frame(weekday, month =factor(1), time_index= median(time_index),time_index_2 = median(time_index_2),time_index_3= median(time_index_3),time_index_4= median(time_index_4)))
-season_year =  predict( model_1, data.frame(weekday= factor(1), month, time_index= median(time_index),time_index_2 = median(time_index_2),time_index_3= median(time_index_3),time_index_4= median(time_index_4)))
-ts.plot( exp(fitted)+1, ts(fitData_no_closed_days$Actual), col= c(2,1))
-##################################################################################################################
 WAPE( (exp(fitted)+1),  fitData_no_closed_days$Actual)
-
-
-acf( residuals)
-#newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday),  week= factor(forecastData_no_closed_days$Week), time_index= c((length(y)+1): (length(y)+ length(forecastData_no_closed_days$Actual)) ))
 no_trend = rep( length(y), length(forecastData_no_closed_days$Week))
 no_trend_2 = no_trend^2
 no_trend_3= no_trend^3
 no_trend_4= no_trend^4
-#newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday),  week= factor(forecastData_no_closed_days$Week), time_index= no_trend,time_index_2= no_trend_2,time_index_3= no_trend_3,time_index_4 = no_trend_4 ) # we assume no trend
-# for data > 3 years
-newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday),  month= factor(forecastData_no_closed_days$Month), time_index= no_trend,time_index_2= no_trend_2,time_index_3= no_trend_3,time_index_4 = no_trend_4 ) # we assume no trend
-# for data < 3
+newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday), time_index= no_trend,time_index_2= no_trend_2,time_index_3= no_trend_3,time_index_4 = no_trend_4 ) # we assume no trend
 predicted= predict( model_1, newdata ) 
+################################################## between 1 and 3 years ###############################################
+}else if( length(y)> 365 && length(y) < 1095) {
+for(i in 1:10){
+model_1 <- lm(y ~ weekday + month + time_index + time_index_2+ time_index_3+ time_index_4)
+fitted <- predict( model_1, data.frame( weekday,month, time_index,time_index_2,time_index_3,time_index_4) )
+distances<- abs( exp(fitted) -  (fitData_no_closed_days$Actual+1) )
+outliers<- distances/(exp(fitted)) > 0.7  & distances> 3*sqrt(pmax(0,(exp(fitted)-1)))
+y=  log( fitData_no_closed_days$Actual+1 )
+y[outliers]= NA 
+}
+y=  log( fitData_no_closed_days$Actual+1 )
+outliers[is.na(outliers)]= FALSE
+residuals =  y- fitted   # so to mantain the order
+residuals[outliers]= 0  # substitute outliers with zero
+fitted= predict( model_1, data.frame( weekday,month, time_index,time_index_2,time_index_3,time_index_4) ) # for data smaller than 3 years
 
-
-summary(model_1)
-ts.plot(predicted)
-# predict new data
-
-
-
-
-
-
-#as.factor( c(as.numeric(forecastData_no_closed_days$Weekday[ length(forecastData_no_closed_days$Weekday)]:52), c(1:52)))
-
+WAPE( (exp(fitted)+1),  fitData_no_closed_days$Actual)
+no_trend = rep( length(y), length(forecastData_no_closed_days$Week))
+no_trend_2 = no_trend^2
+no_trend_3= no_trend^3
+no_trend_4= no_trend^4
+newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday),  month= factor(forecastData_no_closed_days$Month), time_index= no_trend,time_index_2= no_trend_2,time_index_3= no_trend_3,time_index_4 = no_trend_4 ) # we assume no trend
+predicted= predict( model_1, newdata ) 
+#################################################### more than 3 years ###############################
+} else if( length(y) > 1095) {
+  
+  summary(model_1)
+  
+  for(i in 1:10){
+    model_1 <- lm(y ~ weekday + week + time_index + time_index_2+ time_index_3+ time_index_4)
+    data_no_levels= remove_missing_levels(fit=model_1, test_data=data.frame( weekday, week, time_index,time_index_2,time_index_3,time_index_4))
+    fitted <- predict( model_1, data_no_levels)
+    set_holes <-  data_no_levels[ is.na(fitted),]
+    set_holes[is.na(set_holes)]= 1
+    for(k in 1:length(fitted)){
+      i=1
+    data_fixed= set_holes[i,]
+    data_fixe
+    fitted[set_holes$time_index[i]] = predict( model_1, data_fixed ) + model_1$coefficients
+      
+      
+    }
+    #fitted <- predict( model_1, data.frame( weekday, week, time_index,time_index_2,time_index_3,time_index_4) )
+    #ts.plot(exp(fitted))
+    data_no_closed_days$fitted <- exp(fitted)
+    distances<- abs( exp(fitted) -  (fitData_no_closed_days$Actual+1) )
+    outliers<- distances/(exp(fitted)) > 0.7  & distances> 3*sqrt(pmax(0,(exp(fitted)-1)))
+    y=  log( fitData_no_closed_days$Actual+1 )
+    y[outliers]= NA 
+  }
+  y=  log( fitData_no_closed_days$Actual+1 )
+  outliers[is.na(outliers)]= FALSE
+  sum(outliers)
+  summary(model_1)
+  residuals =  y- fitted   # so to mantain the order
+  residuals[outliers]= 0  # substitute outliers with zero
+  fitted= predict( model_1, data.frame( weekday,week, time_index,time_index_2,time_index_3,time_index_4) )
+  WAPE( (exp(fitted)+1),  fitData_no_closed_days$Actual)
+  no_trend = rep( length(y), length(forecastData_no_closed_days$Week))
+  no_trend_2 = no_trend^2
+  no_trend_3= no_trend^3
+  no_trend_4= no_trend^4
+  newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday),  week= factor(forecastData_no_closed_days$Week), time_index= no_trend,time_index_2= no_trend_2,time_index_3= no_trend_3,time_index_4 = no_trend_4 ) # we assume no trend
+  predicted= predict( model_1, newdata ) 
+  
+}
 
 library(RSNNS)
 
