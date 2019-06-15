@@ -242,12 +242,13 @@ predicted= predict( model_1, newdata )
   summary(model_1)
   residuals =  y- fitted   # so to mantain the order
   residuals[outliers]= 0  # substitute outliers with zero
-  fitted= predict( model_1, data.frame( weekday,week, time_index,time_index_2,time_index_3,time_index_4) )
   WAPE( (exp(fitted)+1),  fitData_no_closed_days$Actual)
   no_trend = rep( length(y), length(forecastData_no_closed_days$Week))
   no_trend_2 = no_trend^2
   no_trend_3= no_trend^3
   no_trend_4= no_trend^4
+  
+  ######################fare la stessa cosa di su !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   newdata <- data.frame( weekday= factor(forecastData_no_closed_days$Weekday),  week= factor(forecastData_no_closed_days$Week), time_index= no_trend,time_index_2= no_trend_2,time_index_3= no_trend_3,time_index_4 = no_trend_4 ) # we assume no trend
   predicted= predict( model_1, newdata ) 
   
