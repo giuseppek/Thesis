@@ -1,5 +1,6 @@
 library(MASS)
 library(magrittr)
+library(imputeTS)
 
 ##### fuunction for selecting data between two specific dates
 DataInPeriod <- function(x, startDate, endDate) {
@@ -216,26 +217,21 @@ predicted= predict( model_1, newdata )
 #################################################### more than 3 years ###############################
 } else if( length(y) > 1095) {
   
-  summary(model_1)
+  
   
   for(i in 1:10){
     model_1 <- lm(y ~ weekday + week + time_index + time_index_2+ time_index_3+ time_index_4)
-    data_no_levels= remove_missing_levels(fit=model_1, test_data=data.frame( weekday, week, time_index,time_index_2,time_index_3,time_index_4))
-    fitted <- predict( model_1, data_no_levels)
-    set_holes <-  data_no_levels[ is.na(fitted),]
-    set_holes[is.na(set_holes)]= 1
-    for(k in 1:length(fitted)){
-      i=1
-    data_fixed= set_holes[i,]
-    data_fixe
-    fitted[set_holes$time_index[i]] = predict( model_1, data_fixed ) + model_1$coefficients
-      
-      
-    }
+    #data_no_levels= remove_missing_levels(fit=model_1, test_data=data.frame( weekday, week, time_index,time_index_2,time_index_3,time_index_4))
+    
     #fitted <- predict( model_1, data.frame( weekday, week, time_index,time_index_2,time_index_3,time_index_4) )
+    fitted_constant_week <- predict( model_1, data.frame( weekday,week= factor(1), time_index,time_index_2,time_index_3,time_index_4) ) 
+    data_only_weeks= remove_missing_levels(model_1,data.frame( weekday= factor(1),week= factor(c(1:53,1:53,1:53)) , time_index=0,time_index_2=0,time_index_3=0,time_index_4=0)) # make data set larger so to interpolate correctly beginning and end of the year
+    weeks_coefficient <- predict( model_1, data_only_weeks)  - model_1$coefficients[1] 
+    weeks_coefficient<- as.vector(na.interpolation( weeks_coefficient)[54:106]) 
+    fitted = fitted_constant_week + weeks_coefficient[ fitData_no_closed_days$Week]
+    #ts.plot(exp(fitted)+1, ts(fitData_no_closed_days$Actual), col= c(1,2))
     #ts.plot(exp(fitted))
-    data_no_closed_days$fitted <- exp(fitted)
-    distances<- abs( exp(fitted) -  (fitData_no_closed_days$Actual+1) )
+    distances<- abs( (exp(fitted)+1)-  fitData_no_closed_days$Actual)
     outliers<- distances/(exp(fitted)) > 0.7  & distances> 3*sqrt(pmax(0,(exp(fitted)-1)))
     y=  log( fitData_no_closed_days$Actual+1 )
     y[outliers]= NA 
